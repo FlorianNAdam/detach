@@ -1,5 +1,6 @@
+use clap::Parser as ClapParser;
 use crossterm::{
-    cursor::{position, MoveTo, MoveUp, RestorePosition, SavePosition},
+    cursor::{MoveUp, RestorePosition, SavePosition},
     terminal::{Clear, ClearType},
     ExecutableCommand,
 };
@@ -11,7 +12,7 @@ use vt100::{Cell, Color, Parser};
 pub struct VirtualTerminal {
     parser: Parser,
     reader: BufReader<Box<dyn Read + Send>>,
-    _child: Box<dyn Child + Send + Sync>,
+    child: Box<dyn Child + Send + Sync>,
     last_render_height: u16,
 }
 
@@ -80,11 +81,7 @@ fn color_to_ansi_code(color: &Color, is_foreground: bool) -> String {
 }
 
 impl VirtualTerminal {
-    pub fn spawn(
-        command: CommandBuilder,
-        rows: u16,
-        cols: u16,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn spawn(command: CommandBuilder, rows: u16, cols: u16) -> anyhow::Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows: rows,
@@ -101,7 +98,7 @@ impl VirtualTerminal {
         Ok(VirtualTerminal {
             parser,
             reader: BufReader::new(reader),
-            _child: child,
+            child: child,
             last_render_height: 0,
         })
     }
@@ -135,7 +132,7 @@ impl VirtualTerminal {
         false
     }
 
-    pub fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn render(&mut self) -> anyhow::Result<()> {
         let mut buf = [0; 256];
         let mut stdout = stdout();
 
@@ -193,23 +190,38 @@ impl VirtualTerminal {
 
         Ok(())
     }
+
+    pub fn is_child_done(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(self.child.try_wait()?.is_some())
+    }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = CommandBuilder::new("/home/florian/dev/square/target/debug/square");
+#[derive(ClapParser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Command and its arguments
+    #[arg(required = true, num_args = 1..)]
+    cmd: Vec<String>,
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    let command = &args.cmd[0];
+    let args = &args.cmd[1..];
+
+    let mut cmd = CommandBuilder::new(command);
+    for arg in args {
+        cmd.arg(arg);
+    }
+
     let mut vt = VirtualTerminal::spawn(cmd, 24, 80)?;
 
-    println!("Running virtual terminal in bottom area. Your normal terminal is preserved above.");
-    println!("You can still type commands and scroll normally.");
-    println!(
-        "The virtual terminal output will appear in a dynamically sized area at the bottom.\n"
-    );
-
-    // return Ok(());
-
-    loop {
+    while let Ok(false) = vt.is_child_done() {
         vt.render()?;
-        // Small delay to prevent excessive CPU usage
+
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+
+    Ok(())
 }
