@@ -1,6 +1,6 @@
 use clap::Parser as ClapParser;
 use crossterm::{
-    cursor::{MoveUp, RestorePosition, SavePosition},
+    cursor::MoveUp,
     terminal::{Clear, ClearType},
     ExecutableCommand,
 };
