@@ -107,15 +107,13 @@ impl VirtualTerminal {
         let screen = self.parser.screen();
         let (rows, _) = screen.size();
 
-        // Find the last non-empty row (from bottom to top)
         for row in (0..rows).rev() {
             if self.is_row_non_empty(row) {
-                // Return row count (1-based) plus some padding
                 return (row + 1).min(rows);
             }
         }
 
-        1 // Minimum height if all rows are empty
+        0
     }
 
     fn is_row_non_empty(&self, row: u16) -> bool {
@@ -162,9 +160,6 @@ impl VirtualTerminal {
                     frame.push('\n');
                 }
 
-                // Save user cursor position
-                stdout.execute(SavePosition)?;
-
                 // Move up to the *top of the previous frame*
                 if self.last_render_height > 0 {
                     stdout.execute(MoveUp(self.last_render_height))?;
@@ -176,9 +171,6 @@ impl VirtualTerminal {
                 // Print the new frame
                 print!("{}", frame);
                 stdout.flush()?;
-
-                // Restore cursor to where user was typing
-                stdout.execute(RestorePosition)?;
 
                 // Save new render height
                 self.last_render_height = render_rows;
@@ -218,9 +210,8 @@ fn main() -> anyhow::Result<()> {
     let mut vt = VirtualTerminal::spawn(cmd, 24, 80)?;
 
     while let Ok(false) = vt.is_child_done() {
-        vt.render()?;
-
         std::thread::sleep(std::time::Duration::from_millis(50));
+        vt.render()?;
     }
 
     Ok(())
