@@ -189,29 +189,44 @@ impl VirtualTerminal {
 }
 
 #[derive(ClapParser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, long_about = None)]
+#[command(
+    about = "Execute a command in a virtual terminal and display its output live at the bottom of the terminal."
+)]
 struct Args {
     /// Command and its arguments
     #[arg(required = true, num_args = 1..)]
     cmd: Vec<String>,
+
+    /// Virtual terminal rows
+    #[arg(long, default_value_t = 24)]
+    rows: u16,
+
+    /// Virtual terminal columns
+    #[arg(long, default_value_t = 80)]
+    cols: u16,
+
+    /// Refresh interval in milliseconds
+    #[arg(long, default_value_t = 50)]
+    refresh_ms: u64,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let command = &args.cmd[0];
-    let args = &args.cmd[1..];
+    let command_args = &args.cmd[1..];
 
     let mut cmd = CommandBuilder::new(command);
-    for arg in args {
+    for arg in command_args {
         cmd.arg(arg);
     }
 
-    let mut vt = VirtualTerminal::spawn(cmd, 24, 80)?;
+    let mut vt = VirtualTerminal::spawn(cmd, args.rows, args.cols)?;
 
     while let Ok(false) = vt.is_child_done() {
-        std::thread::sleep(std::time::Duration::from_millis(50));
         vt.render()?;
+        std::thread::sleep(std::time::Duration::from_millis(args.refresh_ms));
     }
 
     Ok(())
