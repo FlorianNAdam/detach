@@ -1,7 +1,7 @@
 use crossterm::{
-    cursor::{MoveTo, RestorePosition, SavePosition},
+    cursor::{position, MoveTo, MoveUp, RestorePosition, SavePosition},
     terminal::{Clear, ClearType},
-    ExecutableCommand, QueueableCommand,
+    ExecutableCommand,
 };
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use std::io::{stdout, Write};
@@ -12,6 +12,7 @@ pub struct VirtualTerminal {
     parser: Parser,
     reader: BufReader<Box<dyn Read + Send>>,
     _child: Box<dyn Child + Send + Sync>,
+    last_render_height: u16,
 }
 
 pub fn cell_to_ansi(cell: &Cell) -> String {
@@ -101,6 +102,7 @@ impl VirtualTerminal {
             parser,
             reader: BufReader::new(reader),
             _child: child,
+            last_render_height: 0,
         })
     }
 
@@ -143,27 +145,11 @@ impl VirtualTerminal {
                 self.parser.process(&buf[..n]);
 
                 let screen = self.parser.screen();
-                let mut frame = String::new();
-
                 let (rows, cols) = screen.size();
-
-                // Calculate dynamic height based on content
                 let dynamic_height = self.get_used_height();
-
-                // Save current cursor position
-                stdout.execute(SavePosition)?;
-
-                // Move to the bottom area with dynamic height
-                let terminal_height = crossterm::terminal::size()?.1;
-                let start_row = terminal_height
-                    .saturating_sub(dynamic_height)
-                    .saturating_sub(1);
-
-                stdout.execute(MoveTo(0, start_row))?;
-
-                // Render only the used portion
                 let render_rows = rows.min(dynamic_height);
 
+                let mut frame = String::new();
                 for row in 0..render_rows {
                     for col in 0..cols {
                         if let Some(cell) = screen.cell(row, col) {
@@ -179,11 +165,26 @@ impl VirtualTerminal {
                     frame.push('\n');
                 }
 
-                print!("{}", frame);
+                // Save user cursor position
+                stdout.execute(SavePosition)?;
 
-                // Restore cursor position
-                stdout.execute(RestorePosition)?;
+                // Move up to the *top of the previous frame*
+                if self.last_render_height > 0 {
+                    stdout.execute(MoveUp(self.last_render_height))?;
+                }
+
+                // Clear everything from here down
+                stdout.execute(Clear(ClearType::FromCursorDown))?;
+
+                // Print the new frame
+                print!("{}", frame);
                 stdout.flush()?;
+
+                // Restore cursor to where user was typing
+                stdout.execute(RestorePosition)?;
+
+                // Save new render height
+                self.last_render_height = render_rows;
             }
             Err(e) => {
                 eprintln!("Read error: {}", e);
