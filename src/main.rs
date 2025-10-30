@@ -12,7 +12,7 @@ use vt100::{Cell, Color, Parser};
 pub struct VirtualTerminal {
     parser: Parser,
     reader: BufReader<Box<dyn Read + Send>>,
-    child: Box<dyn Child + Send + Sync>,
+    _child: Box<dyn Child + Send + Sync>,
     last_render_height: u16,
 }
 
@@ -98,7 +98,7 @@ impl VirtualTerminal {
         Ok(VirtualTerminal {
             parser,
             reader: BufReader::new(reader),
-            child: child,
+            _child: child,
             last_render_height: 0,
         })
     }
@@ -179,10 +179,6 @@ impl VirtualTerminal {
             }
         }
     }
-
-    pub fn is_child_done(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
-        Ok(self.child.try_wait()?.is_some())
-    }
 }
 
 #[derive(ClapParser, Debug)]
@@ -211,6 +207,8 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    let refresh_interval = std::time::Duration::from_millis(args.refresh_ms);
+
     let command = &args.cmd[0];
     let command_args = &args.cmd[1..];
 
@@ -221,13 +219,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut vt = VirtualTerminal::spawn(cmd, args.rows, args.cols)?;
 
-    while let Ok(false) = vt.is_child_done() {
-        vt.render()?;
-        std::thread::sleep(std::time::Duration::from_millis(args.refresh_ms));
-    }
-
     while vt.render()? > 0 {
-        std::thread::sleep(std::time::Duration::from_millis(args.refresh_ms));
+        std::thread::sleep(refresh_interval);
     }
 
     Ok(())
