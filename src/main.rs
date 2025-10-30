@@ -130,13 +130,13 @@ impl VirtualTerminal {
         false
     }
 
-    pub fn render(&mut self) -> anyhow::Result<()> {
+    pub fn render(&mut self) -> anyhow::Result<usize> {
         let mut buf = [0; 256];
         let mut stdout = stdout();
 
-        match self.reader.read(&mut buf) {
-            Ok(0) => return Ok(()), // EOF
-            Ok(n) => {
+        match self.reader.read(&mut buf)? {
+            0 => return Ok(0), // EOF
+            n => {
                 self.parser.process(&buf[..n]);
 
                 let screen = self.parser.screen();
@@ -174,13 +174,10 @@ impl VirtualTerminal {
 
                 // Save new render height
                 self.last_render_height = render_rows;
-            }
-            Err(e) => {
-                eprintln!("Read error: {}", e);
+
+                Ok(n)
             }
         }
-
-        Ok(())
     }
 
     pub fn is_child_done(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -226,6 +223,10 @@ fn main() -> anyhow::Result<()> {
 
     while let Ok(false) = vt.is_child_done() {
         vt.render()?;
+        std::thread::sleep(std::time::Duration::from_millis(args.refresh_ms));
+    }
+
+    while vt.render()? > 0 {
         std::thread::sleep(std::time::Duration::from_millis(args.refresh_ms));
     }
 
